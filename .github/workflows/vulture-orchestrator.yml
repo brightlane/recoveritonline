@@ -1,8 +1,6 @@
 name: Vulture Factory Orchestrator
 
 on:
-  schedule:
-    - cron: '0 4 * * *'
   workflow_dispatch:
     inputs:
       pages_to_generate:
@@ -26,6 +24,10 @@ on:
           - mistral-large-3
           - llama-4-405b
           - command-r-plus-248b
+
+  schedule:
+    - cron: '0 4 * * *'
+
   push:
     paths:
       - 'vulture-*.js'
@@ -46,19 +48,29 @@ jobs:
   setup:
     runs-on: ubuntu-latest
     outputs:
-      pages: ${{ steps.input.outputs.pages }}
-      llm: ${{ steps.input.outputs.llm }}
+      pages: ${{ steps.config.outputs.pages }}
+      llm: ${{ steps.config.outputs.llm }}
+      batches: ${{ steps.config.outputs.batches }}
+
     steps:
       - uses: actions/checkout@v4
-      - id: input
-        name: Config
-        env:
-          PAGES: ${{ github.event.inputs.pages_to_generate || 50 }}
-          LLM: ${{ github.event.inputs.llm_model || 'grok-4.1' }}
+
+      - id: config
+        name: Configure inputs
         run: |
+          PAGES=${{ github.event.inputs.pages_to_generate || 50 }}
+          LLM=${{ github.event.inputs.llm_model || 'grok-4.1' }}
+
+          # Always 10 pages per batch
+          BATCH_SIZE=10
+          BATCHES=$(( (PAGES + BATCH_SIZE - 1) / BATCH_SIZE ))
+
           echo "pages=$PAGES" >> $GITHUB_OUTPUT
           echo "llm=$LLM" >> $GITHUB_OUTPUT
-          echo "Using $LLM ($(wc -l < llms.txt) models)"
+          echo "batches=$BATCHES" >> $GITHUB_OUTPUT
+
+          echo "Using LLM: $LLM"
+          echo "Pages: $PAGES | Batches: $BATCHES"
 
   generate:
     needs: setup
@@ -67,21 +79,26 @@ jobs:
       fail-fast: false
       matrix:
         batch: [1,2,3,4,5,6,7,8,9,10]
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
+
       - name: Install
         run: npm ci
-      - name: Generate batch ${{ matrix.batch }}
+
+      - name: Generate batch
         env:
           LLM_MODEL: ${{ needs.setup.outputs.llm }}
           LLM_FILE: llms.txt
-          BATCH_START: ${{ (matrix.batch - 1) * 25 + 1 }}
-          BATCH_END: ${{ matrix.batch * 25 }}
-        run: node vulture-generator.js "$BATCH_START" "$BATCH_END"
+        run: |
+          START=$(( ( ${{ matrix.batch }} - 1 ) * 10 + 1 ))
+          END=$(( ${{ matrix.batch }} * 10 ))
+          node vulture-generator.js "$START" "$END"
+
       - name: Quality check
         run: node quality-check.js
 
@@ -92,31 +109,38 @@ jobs:
       contents: read
       pages: write
       id-token: write
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+
       - run: npm ci
-      - name: SEO + Sitemap
+
+      - name: Build SEO
         run: |
           node seo-meta-injector.js
           node generate-sitemap.js
           node generate-index.js
-      - name: Deploy Pages
+
+      - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: './pages'
-      - name: Live
+
+      - name: Deploy
         uses: actions/deploy-pages@v4
 
   report:
     needs: [seo-deploy, setup]
     runs-on: ubuntu-latest
     if: always()
+
     steps:
       - name: Summary
         run: |
-          echo "✅ ${{ needs.setup.outputs.pages }} pages"
-          echo "🤖 ${{ needs.setup.outputs.llm }}"
+          echo "✅ Pages: ${{ needs.setup.outputs.pages }}"
+          echo "🤖 LLM: ${{ needs.setup.outputs.llm }}"
           echo "🌐 ${{ github.event.repository.html_url }}/pages"
