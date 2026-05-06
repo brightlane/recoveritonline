@@ -1,17 +1,18 @@
-name: Vulture Factory Orchestrator
+name: Vulture Factory Orchestrator 🏭
 
 on:
   schedule:
-    - cron: '0 4 * * *'
-  workflow_dispatch:
+    - cron: '0 4 * * *'  # Daily 4AM UTC
+  workflow_dispatch:  # ✅ RUN BUTTON with LLM dropdown
     inputs:
       pages_to_generate:
-        description: 'Pages to generate (default: 50)'
+        description: 'Pages to generate (1-250)'
         required: false
         default: '50'
         type: number
+        maximum: 250
       llm_model:
-        description: 'LLM from llms.txt'
+        description: 'Select LLM from llms.txt 👇'
         required: false
         default: 'grok-4.1'
         type: choice
@@ -32,105 +33,95 @@ on:
       - 'generator-core.js'
       - 'pages/**'
       - 'llms.txt'
-      - '.github/workflows/vulture-orchestrator.yml'
+      - '.github/workflows/**'
 
 env:
-  NODE_VERSION: '24'  # FIXED: Node 24 (20 deprecated June 2026)
-  PAGES_BASE: 'pages'
-  SITE_BASEURL: ${{ github.event.repository.html_url }}/pages
+  NODE_VERSION: '24'
   LLM_FILE: 'llms.txt'
 
 concurrency:
-  group: vulture-factory-${{ github.ref }}
+  group: vulture-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   setup:
     runs-on: ubuntu-latest
     outputs:
-      pages_to_gen: ${{ steps.calc.outputs.pages }}
-      selected_llm: ${{ steps.calc.outputs.llm }}
+      pages: ${{ steps.input.outputs.pages }}
+      llm: ${{ steps.input.outputs.llm }}
     steps:
       - uses: actions/checkout@v4
-      - name: Verify llms.txt
+      - id: input
+        name: 📋 Config from llms.txt
         run: |
-          if [ ! -f llms.txt ]; then
-            echo "❌ llms.txt missing"
-            exit 1
-          fi
-          echo "✅ $(wc -l < llms.txt) LLMs loaded"
-      - name: Setup Node.js 24 ✅
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-      - name: Install deps
-        run: npm ci --only=production
-      - id: calc
-        name: Config
-        run: |
-          echo "pages=${{ inputs.pages_to_generate || 50 }}" >> $GITHUB_OUTPUT
-          echo "llm=${{ inputs.llm_model || 'grok-4.1' }}" >> $GITHUB_OUTPUT
+          PAGES="${{ github.event.inputs.pages_to_generate || 50 }}"
+          LLM="${{ github.event.inputs.llm_model || 'grok-4.1' }}"
+          echo "pages=$PAGES" >> $GITHUB_OUTPUT
+          echo "llm=$LLM" >> $GITHUB_OUTPUT
+          echo "✅ $PAGES pages with $LLM ($(grep -c '^[^#]' llms.txt) models)"
 
-  generate:
+  orchestrate:
     needs: setup
     runs-on: ubuntu-latest
     strategy:
+      max-parallel: 3
       matrix:
-        batch: [1, 2, 3, 4, 5]  # FIXED: Comma separated only
-        exclude:
-          - batch: 5
+        chunk: ${{ fromJson(needs.setup.outputs.pages / 25) > 1 ? range(1, needs.setup.outputs.pages / 25 + 1) : [1] }}
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - name: Install deps
+          cache: 'npm'
+      - name: Install
         run: npm ci
-      - name: Generate batch ${{ matrix.batch }}
+      - name: 🏭 Generate ${{ matrix.chunk }} (${{ needs.setup.outputs.llm }})
         env:
-          BATCH_START: ${{ (matrix.batch - 1) * 10 + 1 }}
-          BATCH_END: ${{ matrix.batch * 10 }}
-          LLM_MODEL: ${{ needs.setup.outputs.selected_llm }}
+          LLM_MODEL: ${{ needs.setup.outputs.llm }}
           LLM_FILE: llms.txt
-        run: node vulture-generator.js "$BATCH_START" "$BATCH_END"
-      - name: Quality check
+          CHUNK_START: ${{ (matrix.chunk - 1) * 25 + 1 }}
+          CHUNK_END: ${{ matrix.chunk * 25 }}
+        run: |
+          node vulture-generator.js "$CHUNK_START" "$CHUNK_END"
+      - name: Quality
         run: node quality-check.js
 
   deploy:
-    needs: generate
+    needs: orchestrate
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pages: write
       id-token: write
+    environment:
+      name: github-pages
+      url: ${{ github.event.repository.html_url }}/pages
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - name: Install deps
-        run: npm ci
-      - name: SEO + Deploy
+      - run: npm ci
+      - name: SEO Pipeline
         run: |
           node seo-meta-injector.js
-          node generate-sitemap.js
+          node generate-sitemap.js  
           node generate-index.js
-      - name: Upload Pages
+      - name: 🚀 Deploy Pages
         uses: actions/upload-pages-artifact@v3
         with:
           path: './pages'
-      - name: Deploy 🚀
+      - name: Live Site
         uses: actions/deploy-pages@v4
 
-  notify:
+  summary:
     needs: [deploy, setup]
+    if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Report
+      - name: 📊 Vulture Report
         run: |
-          echo "✅ ${{ needs.setup.outputs.pages_to_gen }} pages live!"
-          echo "🤖 ${{ needs.setup.outputs.selected_llm }}"
+          echo "✅ ${{ needs.setup.outputs.pages }} pages deployed"
+          echo "🤖 LLM: ${{ needs.setup.outputs.llm }}"
           echo "🌐 ${{ github.event.repository.html_url }}/pages"
+          echo "📈 Trigger: ${{ github.event_name }}"
