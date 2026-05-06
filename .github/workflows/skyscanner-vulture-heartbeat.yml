@@ -1,53 +1,83 @@
-name: Vulture-Heartbeat
-on:
-  push:
-    branches: [main]
-  schedule:
-    - cron: '0 0 * * *' # Run once a day (Slower/Safer)
-  workflow_dispatch:
+name: Vulture Factory Orchestrator
 
-# ADD THIS SECTION:
-concurrency:
-  group: "pages"
-  cancel-in-progress: false 
+on:
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+    inputs:
+      pages_to_generate:
+        description: 'Pages to generate'
+        required: false
+        default: '50'
+        type: choice
+        options:
+          - '10'
+          - '25'
+          - '50'
+          - '100'
+          - '250'
+      llm_model:
+        description: 'LLM from llms.txt'
+        required: false
+        default: 'grok-4.1'
+        type: choice
+        options:
+          - grok-4.1
+          - claude-4.6-sonnet
+          - gemini-3.1-pro
+          - gpt-5.4-mini
+          - glm-4.7-thinking
+          - deepseek-v3.2
+          - qwen3-235b
+          - mistral-large-3
+          - llama-4-405b
+          - command-r-plus-248b
 
 env:
-  PAGE_LIMIT_PER_RUN: 833
-  AFFILIATE_1: "https://manychat.partnerlinks.io/bbwxetk27f88-64kfxo"
-  AFFILIATE_2: "https://manychat.partnerlinks.io/98hj6b3pr28k-4znb59"
-  AFFILIATE_3: "https://manychat.partnerlinks.io/emwcbue22i01-ogcg6e"
-  AFFILIATE_4: "https://manychat.partnerlinks.io/t8let4hhqtqg-wki14"
-  AFFILIATE_5: "https://manychat.partnerlinks.io/nwkkk7vkps17"
+  CI: true
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  NODE_VERSION: '24'
+
+concurrency:
+  group: vulture-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: https://${{ github.repository_owner }}.github.io/manychat
+
     steps:
-      - uses: actions/checkout@v4
-      
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: 20 # Stable LTS
+          node-version: ${{ env.NODE_VERSION }}
 
-      # Run all generation scripts in one block
-      - name: Generate Content
+      - name: Install Dependencies
         run: |
-          node vulture-generator.js
-          node generate-index.js
-          node generate-sitemap.js
-          node quality-check.js
+          npm init -y
+          npm install fs-extra
 
-      # Commit everything at once to prevent multiple triggers
-      - name: Commit and Push
-        run: |
-          git config user.name "Vulture[bot]"
-          git config user.email "vulture@palmo.kid"
-          git add .
-          if git diff --cached --quiet; then
-            echo "No changes to commit"
-          else
-            git commit -m "Vulture Heartbeat: Daily 833 Strategy Sync"
-            git push
-          fi
+      - name: Generate pages
+        env:
+          PAGES: ${{ github.event.inputs.pages_to_generate || '50' }}
+          LLM: ${{ github.event.inputs.llm_model || 'grok-4.1' }}
+        run: node vulture-generator.js
+
+      - name: Upload Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './pages'
+
+      - name: Deploy Pages
+        uses: actions/deploy-pages@v4
