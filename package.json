@@ -1,9 +1,35 @@
 {
+  "name": "manychat-vulture-factory",
+  "version": "2.6.0",
+  "description": "AI-powered ManyChat affiliate content generator & SEO factory",
+  "main": "vulture-generator.js",
   "scripts": {
-    "orchestrator": "node vulture-generator.js 833 && node generate-index.js && node generate-sitemap.js",
+    "start": "node vulture-generator.js",
     "generate": "node vulture-generator.js",
+    "vulture": "npm run generate && npm run index && npm run sitemap",
+    "orchestrator": "npm run vulture && npm run quality",
     "index": "node generate-index.js",
     "sitemap": "node generate-sitemap.js",
-    "quality": "node quality-check.js"
-  }
-}
+    "quality": "node quality-check.js",
+    "deploy": "npm run orchestrator",
+    "dev": "nodemon vulture-generator.js",
+    "test": "node quality-check.js"
+  },
+  "keywords": [
+    "manychat",
+    "affiliate",
+    "seo",
+    "content-factory",
+    "vulture",
+    "automation"
+  ],
+  "author": "Brightlane <vulture@brightlane.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/brightlane/manychat.com"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependen
