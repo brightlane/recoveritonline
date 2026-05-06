@@ -1,65 +1,68 @@
-// 🔥 GENERATE-SITEMAP.JS - VULTURE 20K SEO POWER
-// Benny "Palmo Kid" - Perfect Google/Bing/Yandex indexing
-// Generates sitemap.xml with all 833 vulture pages
+name: Vulture Factory Orchestrator
 
-const fs = require('fs');
-const path = require('path');
+on:
+  schedule:
+    - cron: '0 13 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Run mode"
+        default: "full"
+        type: choice
+        options: [full, generate-only, deploy-only]
+      force_rebuild:
+        description: "Force rebuild"
+        default: false
+        type: boolean
 
-console.log('🚀 Generating Vulture Sitemap...');
+jobs:
+  orchestrator:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-try {
-  // Build sitemap with all generated pages
-  let sitemap = `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
-        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
-  <url>
-    <loc>https://yourdomain.com/</loc>
-    <lastmod>${new Date().toISOString().split('T')[0]}</lastmod>
-    <changefreq>daily</changefreq>
-    <priority>1.0</priority>
-  </url>`;
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
-  // Add all vulture pages
-  const pageFiles = fs.readdirSync('.')
-    .filter(f => /^vulture-page-\d+\.html$/.test(f))
-    .sort();
+      - name: Force Install Dependencies
+        run: |
+          echo "Installing with legacy peer resolution..."
+          # This flag bypasses the exact ERESOLVE error you just hit
+          npm install --legacy-peer-deps || (
+            echo "⚠️ Standard install failed, forcing clean slate..."
+            npm cache clean --force
+            rm -rf node_modules
+            npm install --legacy-peer-deps --force
+          )
 
-  pageFiles.forEach(filename => {
-    const pageNum = filename.match(/vulture-page-(\d+)\.html/)[1];
-    sitemap += `
-  <url>
-    <loc>/vulture-page-${pageNum}.html</loc>
-    <lastmod>${new Date().toISOString().split('T')[0]}</lastmod>
-    <changefreq>daily</changefreq>
-    <priority>0.8</priority>
-  </url>`;
-  });
+      - name: Execution with Self-Healing Loop
+        run: |
+          MAX_RETRIES=3
+          COUNT=1
+          SUCCESS=false
+          
+          while [ $COUNT -le $MAX_RETRIES ]; do
+            echo "Attempt $COUNT of $MAX_RETRIES..."
+            # Using the inputs with safe shell defaults
+            if node vulture-orchestrator.js --mode=${{ github.event.inputs.mode || 'full' }} --force=${{ github.event.inputs.force_rebuild || 'false' }}; then
+              echo "✅ Orchestrator Success!"
+              SUCCESS=true
+              break
+            else
+              echo "⚠️ Attempt $COUNT failed. Running recovery..."
+              # Target specific Vulture cache corruption
+              rm -rf node_modules/.cache
+              [ -f "vulture-repair-tool.js" ] && node vulture-repair-tool.js
+              
+              COUNT=$((COUNT+1))
+              sleep 5
+            fi
+          done
 
-  sitemap += `
-</urlset>`;
-
-  // Write sitemap
-  fs.writeFileSync('sitemap.xml', sitemap);
-  
-  console.log(`✅ SITEMAP CREATED:`);
-  console.log(`   📄 Total URLs: ${pageFiles.length + 1}`);
-  console.log(`   🌐 Homepage + ${pageFiles.length} vulture pages`);
-  console.log(`   📈 Daily crawl priority - Google loves it!`);
-  console.log(`   💾 Saved: sitemap.xml`);
-
-} catch (error) {
-  console.log('⚠️  Sitemap partial - continuing workflow');
-  // Create minimal sitemap as fallback
-  fs.writeFileSync('sitemap.xml', `<?xml version="1.0"?><urlset><url><loc>/</loc></url></urlset>`);
-  console.log('✅ Minimal sitemap created');
-}
-
-// Add robots.txt
-const robots = `User-agent: *
-Allow: /
-Sitemap: https://yourdomain.com/sitemap.xml`;
-fs.writeFileSync('robots.txt', robots);
-console.log('✅ robots.txt created with sitemap link');
-
-console.log('\n🎉 SEO INFRASTRUCTURE COMPLETE');
-console.log('🚀 Ready for GitHub Pages / Netlify / Vercel deployment');
+          if [ "$SUCCESS" = false ]; then
+            echo "❌ Final failure after $MAX_RETRIES attempts."
+            exit 1
+          fi
