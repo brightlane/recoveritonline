@@ -7,12 +7,10 @@ on:
     inputs:
       pages_to_generate:
         description: 'Pages to generate'
-        required: false
         default: '50'
         type: number
       llm_model:
-        description: 'Select LLM from llms.txt'
-        required: false
+        description: 'LLM from llms.txt'
         default: 'grok-4.1'
         type: choice
         options:
@@ -26,88 +24,70 @@ on:
           - mistral-large-3
           - llama-4-405b
           - command-r-plus-248b
-  push:
-    paths:
-      - 'vulture-*.js'
-      - 'generator-core.js'
-      - 'pages/**'
-      - 'llms.txt'
-      - 'package*.json'
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true  # ✅ FIX Node 20 warnings
-  NODE_VERSION: '24'
   CI: true
+  NODE_VERSION: '24'
 
 concurrency:
   group: vulture-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  test-setup:
+  setup:
     runs-on: ubuntu-latest
     outputs:
-      pages: ${{ steps.set.outputs.pages }}
-      llm: ${{ steps.set.outputs.llm }}
+      pages: ${{ steps.vars.outputs.pages }}
+      llm: ${{ steps.vars.outputs.llm }}
     steps:
-      - uses: actions/checkout@v4
-      - id: set
+      - id: vars
         run: |
           echo "pages=${{ github.event.inputs.pages_to_generate || 50 }}" >> $GITHUB_OUTPUT
           echo "llm=${{ github.event.inputs.llm_model || 'grok-4.1' }}" >> $GITHUB_OUTPUT
 
-  generate:
-    needs: test-setup
+  build:
+    needs: setup
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      max-parallel: 2
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Node.js 24 ✅
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
       - name: Install
         run: npm install
-      - name: Test generator exists
+      - name: Generate pages
+        env:
+          LLM_MODEL: ${{ needs.setup.outputs.llm }}
+          BATCH_START: 1
+          BATCH_END: ${{ needs.setup.outputs.pages }}
+        run: node vulture-generator.js
+      - name: SEO
         run: |
-          ls -la vulture-generator.js || echo "⚠️ vulture-generator.js missing"
-      - name: Mock generate
-        run: |
-          echo "Mock: would generate pages ${{ needs.test-setup.outputs.pages }}"
-          echo "Using LLM: ${{ needs.test-setup.outputs.llm }}"
-          mkdir -p pages
-          echo "<h1>Vulture Page Mock</h1>" > pages/test.html
-          echo "✅ Mock success"
-        # Skip real generation until scripts exist
+          node seo-meta-injector.js || echo "SEO skipped"
+          node generate-sitemap.js || echo "Sitemap skipped"
+          node generate-index.js || echo "Index skipped"
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: './pages'
 
   deploy:
-    needs: generate
+    needs: build
+    environment:
+      name: github-pages  # ✅ FIXED deploy error
+      url: ${{ github.repository_owner }}.github.io/manychat
     runs-on: ubuntu-latest
-    if: always()
     permissions:
-      contents: read
       pages: write
       id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
-      - name: Deploy mock pages
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: './pages'
-      - name: Deploy to GitHub Pages
-        uses: actions/deploy-pages@v4
+      - uses: actions/deploy-pages@v4
 
-  summary:
-    needs: [deploy, test-setup]
+  report:
+    needs: [deploy, setup]
     runs-on: ubuntu-latest
     steps:
-      - name: Report
-        run: |
-          echo "✅ Setup complete: ${{ needs.test-setup.outputs.pages }} pages"
-          echo "🤖 LLM ready: ${{ needs.test-setup.outputs.llm }}"
-          echo "🌐 Live: ${{ github.event.repository.html_url }}/pages"
+      - run: |
+          echo "✅ ${{ needs.setup.outputs.pages }} pages deployed"
+          echo "🤖 ${{ needs.setup.outputs.llm }}"
+          echo "🌐 https://${{ github.repository_owner }}.github.io/manychat"
