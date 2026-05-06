@@ -4,6 +4,20 @@ const path = require('path');
 const axios = require('axios');
 const cheerio = require('cheerio');
 
+/**
+ * VULTURE SAFE SDK COMPATIBILITY LAYER
+ * Prevents broken or legacy package references from crashing CI
+ */
+let googleAI;
+
+try {
+  const { GoogleGenerativeAI } = require("@google/generative-ai");
+  googleAI = GoogleGenerativeAI;
+} catch (e) {
+  console.warn("⚠️ Google Generative AI SDK not available");
+  googleAI = null;
+}
+
 // Config from GitHub Actions
 const startPage = parseInt(process.env.BATCH_START || '1');
 const endPage = parseInt(process.env.BATCH_END || '10');
@@ -67,6 +81,26 @@ async function generatePage(pageNum) {
   console.log(`✅ Created ${filename}`);
   
   return filename;
+}
+
+/**
+ * LLM RESOLVER (ADDED - SAFE MODEL MAPPING)
+ */
+function resolveLLM(model) {
+  const map = {
+    "grok-4.1": "grok",
+    "claude-4.6-sonnet": "claude",
+    "gemini-3.1-pro": "gemini",
+    "gpt-5.4-mini": "openai",
+    "glm-4.7-thinking": "glm",
+    "deepseek-v3.2": "deepseek",
+    "qwen3-235b": "qwen",
+    "mistral-large-3": "mistral",
+    "llama-4-405b": "llama",
+    "command-r-plus-248b": "cohere"
+  };
+
+  return map[model] || "unknown";
 }
 
 async function main() {
