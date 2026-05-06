@@ -1,7 +1,8 @@
 name: Vulture Factory Orchestrator
+
 on:
   schedule:
-    - cron: '0 4 * * *'  # Daily 4AM EDT (post-midnight generation)
+    - cron: '0 4 * * *'  # Daily 4AM UTC (GitHub uses UTC)
   workflow_dispatch:
     inputs:
       pages_to_generate:
@@ -32,40 +33,43 @@ jobs:
       pages_to_gen: ${{ steps.calc.outputs.pages }}
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-          
+
       - name: Install dependencies
         run: npm ci --only=production
-        
+
       - id: calc
         name: Calculate pages
         run: |
-          PAGES=${{ inputs.pages_to_generate || 50 }}
+          PAGES="${{ github.event.inputs.pages_to_generate }}"
+          if [ -z "$PAGES" ]; then
+            PAGES=50
+          fi
           echo "pages=$PAGES" >> $GITHUB_OUTPUT
-          echo "Generating $PAGES vulture pages daily..."
+          echo "Generating $PAGES vulture pages..."
 
   generate-content:
     needs: setup
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        batch: [1, 2, 3, 4, 5]  # Parallel batches for speed
+        batch: [1, 2, 3, 4, 5]
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          
+
       - name: Install deps
         run: npm ci
-        
+
       - name: Generate vulture batch ${{ matrix.batch }}
         env:
           BATCH_START: ${{ (matrix.batch - 1) * 10 + 1 }}
@@ -73,7 +77,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           node vulture-generator.js $BATCH_START $BATCH_END
-          
+
       - name: Quality check
         run: node quality-check.js
 
@@ -82,18 +86,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          
+
+      - name: Install deps
+        run: npm ci
+
       - name: Inject SEO meta
         run: node seo-meta-injector.js
-        
+
       - name: Generate sitemap
         run: node generate-sitemap.js
-        
+
       - name: Update index
         run: node generate-index.js
 
@@ -101,37 +108,34 @@ jobs:
     needs: seo-optimization
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
       pages: write
       id-token: write
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
-        
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: './pages'
-          
+
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
 
   notify:
-    needs: deploy
+    needs: [deploy, setup]
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Notify success
-        if: success()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: '✅ **Vulture Factory**: Deployed ${{ needs.setup.outputs.pages_to_gen }} fresh pages! Live at ${{ github.event.repository.html_url }}/pages'
-            })
+      - name: Log result
+        run: |
+          if [ "${{ needs.deploy.result }}" = "success" ]; then
+            echo "✅ Vulture Factory deployed ${{ needs.setup.outputs.pages_to_gen }} pages"
+            echo "Live at: ${{ github.event.repository.html_url }}/pages"
+          else
+            echo "❌ Deployment failed"
+          fi
