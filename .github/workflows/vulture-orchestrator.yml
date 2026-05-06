@@ -1,61 +1,25 @@
 name: Vulture Factory Orchestrator
 
 on:
-  schedule:
-    - cron: '0 13 * * *'
-  workflow_dispatch:
-    inputs:
-      mode:
-        description: "Run mode"
-        required: true
-        default: "full"
-        type: choice
-        options: [full, generate-only, deploy-only]
-      force_rebuild:
-        description: "Force rebuild all pages"
-        required: false
-        default: false
-        type: boolean
+  push:
+  pull_request:
 
 jobs:
   orchestrator:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout Code
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          # Removed the 'cache' line that caused your Error #32
+          node-version: 20
+          cache: npm
 
-      - name: Heal and Install Dependencies
-        run: |
-          echo "Attempting standard dependency install..."
-          npm install || (
-            echo "⚠️ Install failed. Initiating self-healing..."
-            npm cache clean --force
-            rm -rf node_modules
-            npm install
-          )
+      - name: Install dependencies (safe CI mode)
+        run: npm install --legacy-peer-deps
 
-      - name: Run Orchestrator with Auto-Retry
-        id: run_main
-        uses: nick-invision/retry@v3
-        with:
-          timeout_minutes: 15
-          max_attempts: 2
-          retry_on: error
-          command: |
-            node vulture-orchestrator.js --mode=${{ github.event.inputs.mode || 'full' }} --force=${{ github.event.inputs.force_rebuild || 'false' }}
-
-      - name: Emergency Repair on Hard Failure
-        if: failure() && steps.run_main.outcome == 'failure'
-        run: |
-          echo "❌ Main run and retries failed. Attempting deep repair..."
-          # If the JS script crashed, try running a repair tool if it exists
-          if [ -f "vulture-repair-tool.js" ]; then
-            node vulture-repair-tool.js
-          fi
-          echo "Deep repair attempt finished."
+      - name: Run orchestrator
+        run: npm run orchestrator
