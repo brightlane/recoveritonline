@@ -65,8 +65,9 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          # legacy-peer-deps ignores the LangChain version mismatch to allow the build to proceed
-          npm install fs-extra langchain @langchain/anthropic @langchain/openai --legacy-peer-deps
+          # Use legacy-peer-deps to bypass version conflicts
+          # Installing the specific LangChain integrations needed for the models in your list
+          npm install fs-extra langchain @langchain/anthropic @langchain/openai @langchain/google-genai @langchain/mistralai @langchain/community --legacy-peer-deps
 
       - name: Generate pages
         env:
