@@ -1,4 +1,12 @@
 name: Vulture Factory Orchestrator
 on:
   schedule:
-    - cron: '0 3 * * *'  # Daily
+    - cron: '0 3 * * *'  # Daily 3AM
+  workflow_dispatch:  # Manual trigger
+  push:
+    branches: [ main ]
+    
+jobs:
+  vulture-factory:
+    runs-on: ubuntu-latest
+    strategy
