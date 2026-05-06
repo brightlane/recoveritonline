@@ -10,7 +10,12 @@
     "sitemap": "node generate-sitemap.js",
     "index": "node generate-index.js"
   },
-  "keywords": ["affiliate", "manychat", "seo", "automation"],
+  "keywords": [
+    "affiliate",
+    "manychat",
+    "seo",
+    "automation"
+  ],
   "author": "brightlane",
   "license": "MIT",
   "engines": {
@@ -22,7 +27,7 @@
     "fs-extra": "^11.2.0",
     "jsdom": "^24.0.0",
     "openai": "^4.52.0",
-    "anthropic": "^1.9.0",
+    "@anthropic-ai/sdk": "^0.24.0",
     "google-generativeai": "^0.20.0",
     "langchain": "^0.3.0"
   },
