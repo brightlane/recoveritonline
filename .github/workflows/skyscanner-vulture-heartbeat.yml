@@ -64,28 +64,12 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: Install Dependencies
-        run: |
-          # Create package.json if it's missing to allow npm install to run
-          if [ ! -f package.json ]; then
-            npm init -y
-          fi
-          
-          npm install \
-            fs-extra \
-            langchain \
-            @langchain/anthropic \
-            @langchain/openai \
-            @langchain/google-genai \
-            @langchain/mistralai \
-            @langchain/community \
-            @langchain/core \
-            --legacy-peer-deps
+        run: npm install --legacy-peer-deps
 
       - name: Generate pages
         env:
           PAGES: ${{ github.event.inputs.pages_to_generate || '50' }}
           LLM: ${{ github.event.inputs.llm_model || 'grok-4.1' }}
-          # Ensure these secrets are set in your Repo Settings > Secrets and variables > Actions
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
