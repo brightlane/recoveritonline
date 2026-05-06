@@ -62,10 +62,14 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm' # Added caching for faster subsequent runs
 
       - name: Install Dependencies
         run: |
+          # Create package.json if it's missing to allow npm install to run
+          if [ ! -f package.json ]; then
+            npm init -y
+          fi
+          
           npm install \
             fs-extra \
             langchain \
@@ -81,10 +85,11 @@ jobs:
         env:
           PAGES: ${{ github.event.inputs.pages_to_generate || '50' }}
           LLM: ${{ github.event.inputs.llm_model || 'grok-4.1' }}
-          # Ensure your API keys are added to GitHub Secrets
+          # Ensure these secrets are set in your Repo Settings > Secrets and variables > Actions
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
         run: node vulture-generator.js
 
       - name: Upload Pages
