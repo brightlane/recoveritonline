@@ -1,25 +1,152 @@
 name: Vulture Factory Orchestrator
 
 on:
+  schedule:
+    - cron: '0 13 * * *'  # Daily at 1 PM UTC (9 AM EDT)
+  workflow_dispatch:  # Manual trigger
   push:
-  pull_request:
-  workflow_dispatch:  # ✅ manual run button
+    paths:
+      - 'vulture-*.js'
+      - 'generator-*.js'
+      - 'pages/**'
+      - '.github/workflows/**'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  orchestrator:
+  generate:
+    name: 🦅 Generate Vulture Pages
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repo
+      - name: 📥 Checkout repo
         uses: actions/checkout@v4
-
-      - name: Setup Node.js
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: 🛠️ Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '20'
+          cache: 'npm'
+          
+      - name: 📦 Install dependencies
+        run: npm ci --ignore-scripts
+        
+      - name: 🦅 Run Vulture Generator
+        run: |
+          node vulture-generator.js 833
+          node generate-index.js
+          
+      - name: 🔍 Quality Check
+        run: node quality-check.js
+        
+      - name: 🗺️ Generate Sitemap
+        run: node generate-sitemap.js
+        
+      - name: 📊 Commit Generated Files
+        run: |
+          git config user.name "Vulture Factory"
+          git config user.email "vulture@brightlane.com"
+          git add .
+          git diff --staged --quiet || git commit -m "🦅 Vulture Heartbeat: Daily $(date +%Y-%m-%d) Strategy Sync"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install dependencies (CI-safe mode)
-        run: npm install --legacy-peer-deps
+  deploy:
+    name: 🚀 Deploy to GitHub Pages
+    needs: generate
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+    steps:
+      - name: 📥 Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: 🔄 Wait for GitHub Pages Recovery
+        id: recovery-check
+        run: |
+          echo "Checking GitHub Pages status..."
+          for i in {1..12}; do  # Retry up to 60 minutes
+            if curl -s -o /dev/null -w "%{http_code}" https://www.githubstatus.com/api/v2/components.json | grep -q '"status":"operational"'; then
+              echo "✅ GitHub Pages operational"
+              echo "status=ready" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            echo "⏳ GitHub Pages recovering... ($i/12)"
+            sleep 300  # 5 minutes
+          done
+          echo "❌ GitHub Pages still degraded - skipping deploy"
+          echo "status=skip" >> $GITHUB_OUTPUT
+          exit 78  # Non-fatal exit for conditional skip
+          
+      - name: 🛡️ Create .nojekyll
+        run: touch .nojekyll
+        
+      - name: 📦 Upload Pages Artifact
+        if: steps.recovery-check.outputs.status == 'ready'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+          
+      - name: 🚀 Deploy to GitHub Pages
+        if: steps.recovery-check.outputs.status == 'ready'
+        id: deployment
+        uses: actions/deploy-pages@v4
+        
+      - name: 📝 Notify on Failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `🚨 **Vulture Deploy Failed** (${{ github.run_id }})
 
-      - name: Run orchestrator
-        run: npm run orchestrator
+**Error**: Pages deployment failed (likely transient GitHub issue)
+**Status**: ${{ job.status }}
+**Retry**: [Re-run workflow](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/rerun)
+**Check**: [GitHub Status](https://www.githubstatus.com)`
+            })
+
+  health-check:
+    name: 🩺 Health Check & Alert
+    needs: [generate, deploy]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: 📊 Post Deployment Status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const status = '${{ needs.generate.result }}' === 'success' && '${{ needs.deploy.result }}' === 'success' ? '✅' : '❌';
+            const pagesUrl = '${{ needs.deploy.result }}' === 'success' ? '${{ needs.deploy.outputs.page_url || github.server_url }}/manychat.com' : 'Deployment failed';
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number || 1,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `${status} **Vulture Factory #${{ github.run_number }}**
+
+**Generation**: ${{ needs.generate.result }}
+**Deployment**: ${{ needs.deploy.result }}
+**Live Site**: [${pagesUrl}](${pagesUrl})
+**Pages**: ${{ needs.deploy.outputs.page_url || 'Pending' }}
+**Run ID**: ${{ github.run_id }}
+**Time**: ${{ github.run_number }}`
+            })
