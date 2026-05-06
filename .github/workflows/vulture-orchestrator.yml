@@ -6,11 +6,12 @@ on:
   workflow_dispatch:
     inputs:
       pages_to_generate:
-        description: 'Pages to generate'
+        description: 'Pages to generate (default: 50)'
         required: false
         default: '50'
+        type: number
       llm_model:
-        description: 'LLM model'
+        description: 'LLM from llms.txt'
         required: false
         default: 'grok-4.1'
         type: choice
@@ -25,6 +26,19 @@ on:
           - mistral-large-3
           - llama-4-405b
           - command-r-plus-248b
+  push:
+    paths:
+      - 'vulture-*.js'
+      - 'generator-core.js'
+      - 'pages/**'
+      - 'llms.txt'
+      - '.github/workflows/vulture-orchestrator.yml'
+
+env:
+  NODE_VERSION: '24'  # FIXED: Node 24 (20 deprecated June 2026)
+  PAGES_BASE: 'pages'
+  SITE_BASEURL: ${{ github.event.repository.html_url }}/pages
+  LLM_FILE: 'llms.txt'
 
 concurrency:
   group: vulture-factory-${{ github.ref }}
@@ -34,35 +48,89 @@ jobs:
   setup:
     runs-on: ubuntu-latest
     outputs:
-      pages: ${{ steps.calc.outputs.pages }}
-      batches: ${{ steps.calc.outputs.batches }}
-      llm: ${{ steps.calc.outputs.llm }}
+      pages_to_gen: ${{ steps.calc.outputs.pages }}
+      selected_llm: ${{ steps.calc.outputs.llm }}
     steps:
-    - uses: actions/checkout@v4
-
-    - id: calc
-      run: |
-        PAGES=${{ github.event.inputs.pages_to_generate || 50 }}
-        BATCH_SIZE=10
-        BATCHES=$(( (PAGES + BATCH_SIZE - 1) / BATCH_SIZE ))
-
-        echo "pages=$PAGES" >> $GITHUB_OUTPUT
-        echo "batches=$BATCHES" >> $GITHUB_OUTPUT
-        echo "llm=${{ github.event.inputs.llm_model || 'grok-4.1' }}" >> $GITHUB_OUTPUT
+      - uses: actions/checkout@v4
+      - name: Verify llms.txt
+        run: |
+          if [ ! -f llms.txt ]; then
+            echo "❌ llms.txt missing"
+            exit 1
+          fi
+          echo "✅ $(wc -l < llms.txt) LLMs loaded"
+      - name: Setup Node.js 24 ✅
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - name: Install deps
+        run: npm ci --only=production
+      - id: calc
+        name: Config
+        run: |
+          echo "pages=${{ inputs.pages_to_generate || 50 }}" >> $GITHUB_OUTPUT
+          echo "llm=${{ inputs.llm_model || 'grok-4.1' }}" >> $GITHUB_OUTPUT
 
   generate:
     needs: setup
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        batch: ${{ fromJSON(needs.setup.outputs.batches) }}
+        batch: [1, 2, 3, 4, 5]  # FIXED: Comma separated only
+        exclude:
+          - batch: 5
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install deps
+        run: npm ci
+      - name: Generate batch ${{ matrix.batch }}
+        env:
+          BATCH_START: ${{ (matrix.batch - 1) * 10 + 1 }}
+          BATCH_END: ${{ matrix.batch * 10 }}
+          LLM_MODEL: ${{ needs.setup.outputs.selected_llm }}
+          LLM_FILE: llms.txt
+        run: node vulture-generator.js "$BATCH_START" "$BATCH_END"
+      - name: Quality check
+        run: node quality-check.js
 
-    - name: Generate batch
-      env:
-        LLM_MODEL: ${{ needs.setup.outputs.llm }}
-      run: |
-        START=$(( (matrix.batch - 1) * 10 + 1 ))
-        END=$(( matrix.batch * 10 ))
-        node vulture-generator.js "$START" "$END"
+  deploy:
+    needs: generate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install deps
+        run: npm ci
+      - name: SEO + Deploy
+        run: |
+          node seo-meta-injector.js
+          node generate-sitemap.js
+          node generate-index.js
+      - name: Upload Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './pages'
+      - name: Deploy 🚀
+        uses: actions/deploy-pages@v4
+
+  notify:
+    needs: [deploy, setup]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report
+        run: |
+          echo "✅ ${{ needs.setup.outputs.pages_to_gen }} pages live!"
+          echo "🤖 ${{ needs.setup.outputs.selected_llm }}"
+          echo "🌐 ${{ github.event.repository.html_url }}/pages"
