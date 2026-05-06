@@ -62,11 +62,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm' # Added caching for faster subsequent runs
 
       - name: Install Dependencies
         run: |
-          rm -rf node_modules package-lock.json || true
-
           npm install \
             fs-extra \
             langchain \
@@ -75,12 +74,17 @@ jobs:
             @langchain/google-genai \
             @langchain/mistralai \
             @langchain/community \
+            @langchain/core \
             --legacy-peer-deps
 
       - name: Generate pages
         env:
           PAGES: ${{ github.event.inputs.pages_to_generate || '50' }}
           LLM: ${{ github.event.inputs.llm_model || 'grok-4.1' }}
+          # Ensure your API keys are added to GitHub Secrets
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
         run: node vulture-generator.js
 
       - name: Upload Pages
