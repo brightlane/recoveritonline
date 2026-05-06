@@ -1,37 +1,9 @@
 {
-  "name": "vulture-factory",
-  "version": "1.0.0",
-  "description": "ManyChat affiliate vulture page generator",
-  "main": "vulture-generator.js",
   "scripts": {
+    "orchestrator": "node vulture-generator.js 833 && node generate-index.js && node generate-sitemap.js",
     "generate": "node vulture-generator.js",
-    "quality": "node quality-check.js",
-    "seo": "node seo-meta-injector.js",
+    "index": "node generate-index.js",
     "sitemap": "node generate-sitemap.js",
-    "index": "node generate-index.js"
-  },
-  "keywords": [
-    "affiliate",
-    "manychat",
-    "seo",
-    "automation"
-  ],
-  "author": "brightlane",
-  "license": "MIT",
-  "engines": {
-    "node": ">=24"
-  },
-  "dependencies": {
-    "axios": "^1.7.0",
-    "cheerio": "^1.0.0-rc.12",
-    "fs-extra": "^11.2.0",
-    "jsdom": "^24.0.0",
-    "openai": "^4.52.0",
-    "@anthropic-ai/sdk": "^0.24.0",
-    "@google/generative-ai": "^0.20.0",
-    "langchain": "^0.3.0"
-  },
-  "devDependencies": {
-    "eslint": "^9.0.0"
+    "quality": "node quality-check.js"
   }
 }
