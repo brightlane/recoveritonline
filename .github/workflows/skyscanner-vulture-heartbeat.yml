@@ -35,7 +35,6 @@ on:
 
 env:
   CI: true
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   NODE_VERSION: '24'
 
 concurrency:
@@ -45,6 +44,7 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     permissions:
       contents: read
       pages: write
@@ -62,12 +62,23 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
 
-      - name: Install Dependencies
+      - name: Clean install dependencies
         run: |
-          # Use legacy-peer-deps to bypass version conflicts
-          # Installing the specific LangChain integrations needed for the models in your list
-          npm install fs-extra langchain @langchain/anthropic @langchain/openai @langchain/google-genai @langchain/mistralai @langchain/community --legacy-peer-deps
+          rm -rf node_modules package-lock.json
+
+          npm cache clean --force
+
+          npm install \
+            fs-extra \
+            langchain \
+            @langchain/anthropic@latest \
+            @langchain/openai@latest \
+            @langchain/google-genai@latest \
+            @langchain/mistralai@latest \
+            @langchain/community@latest \
+            --legacy-peer-deps --no-audit --no-fund
 
       - name: Generate pages
         env:
