@@ -1,15 +1,14 @@
-name: Vulture Factory Orchestrator
-
 on:
   schedule:
-    - cron: '0 13 * * *'  # Daily 1 PM UTC
+    - cron: '0 13 * * *'  # Daily at 1 PM UTC
 
   workflow_dispatch:
+    description: "Manual run of Vulture Factory Orchestrator"
     inputs:
       mode:
-        description: 'Run mode'
+        description: "Run mode"
         required: true
-        default: 'full'
+        default: "full"
         type: choice
         options:
           - full
@@ -17,13 +16,13 @@ on:
           - deploy-only
 
       force_rebuild:
-        description: 'Force rebuild everything'
+        description: "Force rebuild all pages"
         required: false
         default: false
         type: boolean
 
       debug:
-        description: 'Enable debug logs'
+        description: "Enable debug logging"
         required: false
         default: false
         type: boolean
@@ -34,138 +33,3 @@ on:
       - 'generator-*.js'
       - 'pages/**'
       - '.github/workflows/**'
-
-permissions:
-  contents: write
-  pages: write
-  id-token: write
-
-concurrency:
-  group: vulture-${{ github.ref }}
-  cancel-in-progress: true
-
-# ─────────────────────────────────────────────
-jobs:
-
-  generate:
-    name: 🦅 Generate Vulture Pages
-    runs-on: ubuntu-latest
-    continue-on-error: true
-
-    steps:
-      - name: 📥 Checkout
-        uses: actions/checkout@v4
-
-      - name: 🛠️ Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: 📦 Install deps (self-heal)
-        run: |
-          npm ci || npm install || npm install --legacy-peer-deps
-
-      # ───────── Generator with retry ─────────
-      - name: 🦅 Run Generator (retry-safe)
-        run: |
-          for i in 1 2 3; do
-            echo "Attempt $i"
-            node vulture-generator.js 833 && break || echo "Retrying..."
-            sleep 5
-          done
-
-      - name: 🧠 Generate Index (safe fallback)
-        run: node generate-index.js || echo "Index generation failed - continuing"
-
-      - name: 🔍 Quality Check (non-blocking)
-        run: node quality-check.js || echo "Quality check failed"
-
-      - name: 🗺️ Sitemap (safe execution)
-        run: node generate-sitemap.js || echo "Sitemap failed"
-
-      # ───────── Commit safety layer ─────────
-      - name: 📊 Commit (auto-repair mode)
-        run: |
-          git config user.name "Vulture Factory"
-          git config user.email "vulture@brightlane.com"
-
-          git add .
-
-          if ! git diff --cached --quiet; then
-            git commit -m "🦅 Auto-heal: Vulture sync $(date +%Y-%m-%d)"
-            
-            git pull --rebase origin main || echo "Rebase conflict ignored"
-            git push || echo "Push failed but continuing"
-          else
-            echo "No changes"
-          fi
-
-
-  deploy:
-    name: 🚀 Deploy (self-healing Pages)
-    needs: generate
-    runs-on: ubuntu-latest
-    continue-on-error: true
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: 🛡️ Recovery check (simulated resilience gate)
-        run: |
-          echo "Checking system readiness..."
-          sleep 2
-          echo "OK - proceeding even if degraded"
-
-      - name: 🧱 Ensure Pages structure
-        run: touch .nojekyll || true
-
-      - name: 📦 Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        continue-on-error: true
-        with:
-          path: .
-
-      - name: 🚀 Deploy Pages (retry-safe)
-        id: deploy
-        continue-on-error: true
-        uses: actions/deploy-pages@v4
-
-      - name: 🧾 Recovery log
-        if: always()
-        run: |
-          echo "Deploy finished with status: ${{ job.status }}"
-
-
-  health:
-    name: 🩺 Self-Healing Report
-    needs: [generate, deploy]
-    runs-on: ubuntu-latest
-    if: always()
-
-    steps:
-      - name: 📊 Status Summary
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const gen = '${{ needs.generate.result }}';
-            const dep = '${{ needs.deploy.result }}';
-
-            const status = (gen === 'success' && dep === 'success') ? '✅ HEALTHY' : '⚠️ DEGRADED';
-
-            github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: 1,
-              body: `
-# 🦅 Vulture Factory Report
-
-**Status:** ${status}
-
-- Generate: ${gen}
-- Deploy: ${dep}
-- Run: ${context.runId}
-
-> System is configured for self-healing execution. Failures are isolated and non-blocking.
-              `
-            });
