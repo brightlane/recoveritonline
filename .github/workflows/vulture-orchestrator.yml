@@ -3,7 +3,7 @@ name: Vulture Factory Orchestrator
 on:
   push:
   pull_request:
-  workflow_dispatch:   # ✅ adds the "Run workflow" button
+  workflow_dispatch:  # ✅ manual run button
 
 jobs:
   orchestrator:
@@ -13,13 +13,12 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Setup Node
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
 
-      - name: Install dependencies (safe CI mode)
+      - name: Install dependencies (CI-safe mode)
         run: npm install --legacy-peer-deps
 
       - name: Run orchestrator
