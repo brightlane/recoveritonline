@@ -1,93 +1,61 @@
-name: Vulture Heartbeat
-
 on:
   schedule:
-    - cron: '0 4 * * *'
+    - cron: '0 13 * * *'
   workflow_dispatch:
     inputs:
-      pages_to_generate:
-        description: 'Pages to generate'
-        required: false
-        default: '50'
+      mode:
+        description: "Run mode"
+        required: true
+        default: "full"
         type: choice
-        options:
-          - '10'
-          - '25'
-          - '50'
-          - '100'
-          - '250'
-      llm_model:
-        description: 'LLM from llms.txt'
+        options: [full, generate-only, deploy-only]
+      force_rebuild:
+        description: "Force rebuild all pages"
         required: false
-        default: 'grok-4.1'
-        type: choice
-        options:
-          - grok-4.1
-          - claude-4.6-sonnet
-          - gemini-3.1-pro
-          - gpt-5.4-mini
-          - glm-4.7-thinking
-          - deepseek-v3.2
-          - qwen3-235b
-          - mistral-large-3
-          - llama-4-405b
-          - command-r-plus-248b
-
-env:
-  CI: true
-  NODE_VERSION: '24'
-
-concurrency:
-  group: vulture-${{ github.ref }}
-  cancel-in-progress: true
+        default: false
+        type: boolean
+      debug:
+        description: "Enable debug logging"
+        required: false
+        default: false
+        type: boolean
+  push:
+    paths:
+      - 'vulture-*.js'
+      - 'generator-*.js'
+      - 'pages/**'
+      - '.github/workflows/**'
 
 jobs:
-  deploy:
+  orchestrator:
     runs-on: ubuntu-latest
-
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-
-    environment:
-      name: github-pages
-      url: https://${{ github.repository_owner }}.github.io/manychat
-
     steps:
-      - name: Checkout
+      - name: Checkout Code
         uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version: '20'
 
-      - name: Install Dependencies
-        run: |
-          npm install --legacy-peer-deps \
-            fs-extra \
-            langchain \
-            @langchain/core \
-            @langchain/community \
-            @langchain/openai \
-            @langchain/mistralai \
-            @google/generative-ai
-
-      - name: Generate pages
-        env:
-          PAGES: ${{ github.event.inputs.pages_to_generate || '50' }}
-          LLM: ${{ github.event.inputs.llm_model || 'grok-4.1' }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
-        run: node vulture-generator.js
-
-      - name: Upload Pages
-        uses: actions/upload-pages-artifact@v3
+      # SELF-HEALING STEP: Retry logic for the main orchestrator
+      - name: Run Vulture Factory Orchestrator
+        uses: nick-invision/retry@v3
         with:
-          path: './pages'
+          timeout_minutes: 15
+          max_attempts: 3
+          retry_on: error
+          command: |
+            echo "Starting Orchestrator in ${{ github.event.inputs.mode || 'full' }} mode..."
+            node vulture-orchestrator.js --mode=${{ github.event.inputs.mode || 'full' }} --force=${{ github.event.inputs.force_rebuild || 'false' }}
 
-      - name: Deploy Pages
-        uses: actions/deploy-pages@v4
+      # REPAIR STEP: Executes only if the previous step ultimately fails after 3 tries
+      - name: Automatic Repair / Cleanup
+        if: failure()
+        run: |
+          echo "Detecting corruption or state errors..."
+          # Example repair commands:
+          rm -rf node_modules/.cache
+          npm cache clean --force
+          echo "Attempting emergency one-time recovery run..."
+          node vulture-repair-tool.js || echo "Self-repair failed. Manual intervention required."
