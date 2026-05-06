@@ -10,20 +10,38 @@ on:
         required: false
         default: '50'
         type: number
+      llm_model:
+        description: 'LLM from llms.txt (default: grok-4.1)'
+        required: false
+        default: 'grok-4.1'
+        type: choice
+        options:
+          - grok-4.1
+          - claude-4.6-sonnet
+          - gemini-3.1-pro
+          - gpt-5.4-mini
+          - glm-4.7-thinking
+          - deepseek-v3.2
+          - qwen3-235b
+          - mistral-large-3
+          - llama-4-405b
+          - command-r-plus-248b
   push:
     paths:
       - 'vulture-*.js'
       - 'generator-core.js'
       - 'pages/**'
+      - 'llms.txt'  # Added for LLM rotation
       - '.github/workflows/vulture-orchestrator.yml'
 
 env:
   NODE_VERSION: '20'
   PAGES_BASE: 'pages'
   SITE_BASEURL: ${{ github.event.repository.html_url }}/pages
+  LLM_FILE: 'llms.txt'  # Reference your file
 
 concurrency:
-  group: vulture-factory-${{ github.ref }}
+  group: vulture-factory-${{ github.ref }}-${{ github.event.inputs.llm_model || 'default' }}
   cancel-in-progress: true
 
 jobs:
@@ -31,8 +49,17 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       pages_to_gen: ${{ steps.calc.outputs.pages }}
+      selected_llm: ${{ steps.calc.outputs.llm }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Verify llms.txt exists
+        run: |
+          if [ ! -f "${{ env.LLM_FILE }}" ]; then
+            echo "❌ llms.txt missing - create from template"
+            exit 1
+          fi
+          echo "✅ llms.txt found: $(wc -l < ${{ env.LLM_FILE }}) lines"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -44,14 +71,15 @@ jobs:
         run: npm ci --only=production
 
       - id: calc
-        name: Calculate pages
+        name: Calculate pages & LLM
         run: |
-          PAGES="${{ github.event.inputs.pages_to_generate }}"
-          if [ -z "$PAGES" ]; then
-            PAGES=50
-          fi
+          PAGES="${{ github.event.inputs.pages_to_generate || 50 }}"
+          LLM="${{ github.event.inputs.llm_model || 'grok-4.1' }}"
+          
           echo "pages=$PAGES" >> $GITHUB_OUTPUT
-          echo "Generating $PAGES vulture pages..."
+          echo "llm=$LLM" >> $GITHUB_OUTPUT
+          
+          echo "🚀 Vulture Factory: $PAGES pages using $LLM from llms.txt"
 
   generate-content:
     needs: setup
@@ -70,10 +98,12 @@ jobs:
       - name: Install deps
         run: npm ci
 
-      - name: Generate vulture batch ${{ matrix.batch }}
+      - name: Generate vulture batch ${{ matrix.batch }} with ${{ needs.setup.outputs.selected_llm }}
         env:
           BATCH_START: ${{ (matrix.batch - 1) * 10 + 1 }}
           BATCH_END: ${{ matrix.batch * 10 }}
+          LLM_MODEL: ${{ needs.setup.outputs.selected_llm }}
+          LLM_FILE: ${{ env.LLM_FILE }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           node vulture-generator.js $BATCH_START $BATCH_END
@@ -135,7 +165,8 @@ jobs:
         run: |
           if [ "${{ needs.deploy.result }}" = "success" ]; then
             echo "✅ Vulture Factory deployed ${{ needs.setup.outputs.pages_to_gen }} pages"
-            echo "Live at: ${{ github.event.repository.html_url }}/pages"
+            echo "🤖 LLM: ${{ needs.setup.outputs.selected_llm }} from llms.txt"
+            echo "🌐 Live: ${{ github.event.repository.html_url }}/pages"
           else
             echo "❌ Deployment failed"
           fi
