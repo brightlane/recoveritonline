@@ -12,7 +12,7 @@ on:
       - '.github/workflows/**'
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -28,8 +28,6 @@ jobs:
     steps:
       - name: 📥 Checkout repo
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 🛠️ Setup Node.js
         uses: actions/setup-node@v4
@@ -55,10 +53,8 @@ jobs:
           git config user.name "Vulture Factory"
           git config user.email "vulture@brightlane.com"
           git add .
-          git diff --staged --quiet || git commit -m "🦅 Vulture Heartbeat: Daily $(date +%Y-%m-%d) Sync"
+          git diff --staged --quiet || git commit -m "🦅 Vulture Sync: $(date +%Y-%m-%d)"
           git push
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   deploy:
     name: 🚀 Deploy to GitHub Pages
@@ -96,9 +92,7 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const status = '${{ needs.generate.result }}' === 'success' && '${{ needs.deploy.result }}' === 'success'
-              ? '✅ SUCCESS'
-              : '❌ FAILED';
+            const success = '${{ needs.generate.result }}' === 'success' && '${{ needs.deploy.result }}' === 'success';
 
             github.rest.issues.createComment({
               issue_number: context.issue?.number || 1,
@@ -106,6 +100,7 @@ jobs:
               repo: context.repo.repo,
               body: `🦅 **Vulture Factory Run**
 
-Status: ${status}
-Run ID: ${{ github.run_id }}`
+Status: ${success ? '✅ SUCCESS' : '❌ FAILED'}
+Run ID: ${{ github.run_id }}
+Workflow: ${context.workflow}`
             });
