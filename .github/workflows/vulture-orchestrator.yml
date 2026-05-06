@@ -3,6 +3,7 @@ name: Vulture Factory Orchestrator
 on:
   push:
   pull_request:
+  workflow_dispatch:   # ✅ adds the "Run workflow" button
 
 jobs:
   orchestrator:
