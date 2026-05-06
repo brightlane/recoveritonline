@@ -3,7 +3,6 @@ name: Vulture Factory Orchestrator
 on:
   schedule:
     - cron: '0 13 * * *'
-  # This section enables the "Run workflow" button in the Actions tab
   workflow_dispatch:
     inputs:
       mode:
@@ -17,17 +16,6 @@ on:
         required: false
         default: false
         type: boolean
-      debug:
-        description: "Enable debug logging"
-        required: false
-        default: false
-        type: boolean
-  push:
-    paths:
-      - 'vulture-*.js'
-      - 'generator-*.js'
-      - 'pages/**'
-      - '.github/workflows/**'
 
 jobs:
   orchestrator:
@@ -40,31 +28,34 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm' # Self-healing: uses built-in caching to prevent partial install errors
+          # Removed the 'cache' line that caused your Error #32
 
-      - name: Install Dependencies
-        run: npm ci # Uses clean install for consistency
+      - name: Heal and Install Dependencies
+        run: |
+          echo "Attempting standard dependency install..."
+          npm install || (
+            echo "⚠️ Install failed. Initiating self-healing..."
+            npm cache clean --force
+            rm -rf node_modules
+            npm install
+          )
 
-      - name: Run Vulture Factory Orchestrator (with Retries)
+      - name: Run Orchestrator with Auto-Retry
+        id: run_main
         uses: nick-invision/retry@v3
         with:
           timeout_minutes: 15
-          max_attempts: 3
+          max_attempts: 2
           retry_on: error
           command: |
-            # Handles both manual (inputs) and automated (defaults) triggers
-            MODE="${{ github.event.inputs.mode || 'full' }}"
-            FORCE="${{ github.event.inputs.force_rebuild || 'false' }}"
-            DEBUG="${{ github.event.inputs.debug || 'false' }}"
-            
-            echo "Starting Orchestrator | Mode: $MODE | Force: $FORCE"
-            node vulture-orchestrator.js --mode=$MODE --force=$FORCE --debug=$DEBUG
+            node vulture-orchestrator.js --mode=${{ github.event.inputs.mode || 'full' }} --force=${{ github.event.inputs.force_rebuild || 'false' }}
 
-      - name: Automatic Repair on Failure
-        if: failure()
+      - name: Emergency Repair on Hard Failure
+        if: failure() && steps.run_main.outcome == 'failure'
         run: |
-          echo "⚠️ Primary attempts failed. Initiating self-repair sequence..."
-          # Clean local caches that might be corrupted
-          rm -rf node_modules/.cache
-          # Run the specific repair tool
-          node vulture-repair-tool.js || echo "❌ Self-repair failed. Intervention required."
+          echo "❌ Main run and retries failed. Attempting deep repair..."
+          # If the JS script crashed, try running a repair tool if it exists
+          if [ -f "vulture-repair-tool.js" ]; then
+            node vulture-repair-tool.js
+          fi
+          echo "Deep repair attempt finished."
